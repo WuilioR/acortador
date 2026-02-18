@@ -1,0 +1,19 @@
+# Binarios
+acortador.exe
+acortador
+*.exe
+*.dll
+
+# Base de datos local (SQLite)
+*.db
+*.db-journal
+
+# Carpetas de IDE
+.vscode/
+.idea/
+
+# Dependencias (si usaras vendor)
+vendor/
+
+# Archivos de entorno local
+.env

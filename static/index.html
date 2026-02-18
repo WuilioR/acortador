@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Acortador de URL</title>
+  <meta name="description" content="Acorta tus URLs largas en segundos. Simple, rápido y gratuito." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="bg-orb orb1"></div>
+  <div class="bg-orb orb2"></div>
+
+  <main class="container">
+    <header>
+      <div class="logo">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <span>Acortador</span>
+      </div>
+    </header>
+
+    <section class="hero">
+      <h1>Acorta cualquier URL</h1>
+      <p class="subtitle">Pega tu enlace largo y obtén uno corto al instante.</p>
+    </section>
+
+    <div class="card">
+      <form id="shorten-form">
+        <div class="input-group">
+          <input
+            type="text"
+            id="url-input"
+            placeholder="https://ejemplo.com/una-url-muy-larga..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button type="submit" id="shorten-btn">
+            <span class="btn-text">Acortar</span>
+            <span class="btn-spinner" hidden>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+        <p id="error-msg" class="error-msg" hidden></p>
+      </form>
+
+      <div id="result" class="result" hidden>
+        <p class="result-label">Tu URL acortada:</p>
+        <div class="result-row">
+          <a id="short-link" href="#" target="_blank" rel="noopener"></a>
+          <button id="copy-btn" class="copy-btn" title="Copiar">
+            <svg id="copy-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            <svg id="check-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" hidden>
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const form = document.getElementById('shorten-form');
+    const input = document.getElementById('url-input');
+    const btn = document.getElementById('shorten-btn');
+    const btnText = btn.querySelector('.btn-text');
+    const btnSpinner = btn.querySelector('.btn-spinner');
+    const errorMsg = document.getElementById('error-msg');
+    const result = document.getElementById('result');
+    const shortLink = document.getElementById('short-link');
+    const copyBtn = document.getElementById('copy-btn');
+    const copyIcon = document.getElementById('copy-icon');
+    const checkIcon = document.getElementById('check-icon');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = input.value.trim();
+      if (!url) return;
+
+      // Loading state
+      btnText.hidden = true;
+      btnSpinner.hidden = false;
+      btn.disabled = true;
+      errorMsg.hidden = true;
+      result.hidden = true;
+
+      try {
+        const res = await fetch('/shorten', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || 'Error al acortar la URL');
+        }
+
+        const data = await res.json();
+        shortLink.href = data.short_url;
+        shortLink.textContent = data.short_url;
+        result.hidden = false;
+        result.classList.add('show');
+      } catch (err) {
+        errorMsg.textContent = err.message;
+        errorMsg.hidden = false;
+      } finally {
+        btnText.hidden = false;
+        btnSpinner.hidden = true;
+        btn.disabled = false;
+      }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(shortLink.href);
+        copyIcon.hidden = true;
+        checkIcon.hidden = false;
+        setTimeout(() => {
+          copyIcon.hidden = false;
+          checkIcon.hidden = true;
+        }, 2000);
+      } catch {
+        // fallback
+        shortLink.select?.();
+      }
+    });
+  </script>
+</body>
+</html>
