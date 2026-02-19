@@ -1,9 +1,8 @@
 # Build stage
 FROM golang:1.26-alpine AS builder
 
-# Instalar dependencias necesarias para CGO (necesario para sqlite si no se usa la versión pure-go, pero nosotros usamos modernc.org/sqlite que es pure Go)
-# Aún así, es buena práctica tener git.
-RUN apk add --no-cache git
+# Instalar git y certificados raíz (necesario para HTTPS y descargas de módulos)
+RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 
@@ -29,15 +28,15 @@ COPY --from=builder /app/acortador .
 # Copiar archivos estáticos
 COPY --from=builder /app/static ./static
 
+# Instalar certificados CA en la imagen final para conexiones HTTPS seguras (Supabase)
+RUN apk add --no-cache ca-certificates
+
 # Exponer el puerto
 EXPOSE 8080
 
 # Configurar variables de entorno por defecto
 ENV PORT=8080
-ENV DB_PATH=./urls.db
-
-# Volumen para persistencia de datos
-VOLUME /app/data
+# DATABASE_URL debe ser provisto en tiempo de ejecución (secrets)
 
 # Punto de entrada
 CMD ["./acortador"]

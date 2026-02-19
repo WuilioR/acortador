@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -10,21 +11,33 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 var db *sql.DB
 
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-const codeLen = 6
+const (
+// No necesitamos charset ni codeLen ahora
+)
 
-func randomCode() string {
+var adjectives = []string{
+	"feliz", "rapido", "brillante", "genial", "valiente", "sabio", "fuerte", "amable", "calmado", "fresco",
+	"rojo", "azul", "verde", "dorado", "plateado", "lindo", "epico", "super", "mega", "ultra",
+}
+
+var nouns = []string{
+	"panda", "tigre", "leon", "aguila", "delfin", "perro", "gato", "lobo", "oso", "halcon",
+	"sol", "luna", "estrella", "rio", "monte", "cielo", "mar", "bosque", "fuego", "rayo",
+	"code", "byte", "pixel", "data", "bot", "red", "link", "web", "app", "sitio",
+}
+
+func randomSlug() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	b := make([]byte, codeLen)
-	for i := range b {
-		b[i] = charset[r.Intn(len(charset))]
-	}
-	return string(b)
+	adj := adjectives[r.Intn(len(adjectives))]
+	noun := nouns[r.Intn(len(nouns))]
+	num := r.Intn(1000) // 0-999
+	return fmt.Sprintf("%s-%s-%d", adj, noun, num)
 }
 
 func getEnv(key, fallback string) string {
@@ -36,19 +49,30 @@ func getEnv(key, fallback string) string {
 
 func initDB() {
 	var err error
-	dbPath := getEnv("DB_PATH", "./urls.db")
-	db, err = sql.Open("sqlite", dbPath)
-	if err != nil {
-		log.Fatal("Error abriendo la base de datos:", err)
+	connStr := getEnv("DATABASE_URL", "")
+	if connStr == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
 	}
+
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal("Error opening database connection:", err)
+	}
+
+	// Verify connection
+	if err = db.Ping(); err != nil {
+		log.Fatal("Error connecting to the database:", err)
+	}
+
+	// Create table if not exists (PostgreSQL syntax)
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS urls (
-		id        INTEGER PRIMARY KEY AUTOINCREMENT,
-		code      TEXT UNIQUE NOT NULL,
-		long_url  TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		id SERIAL PRIMARY KEY,
+		code TEXT UNIQUE NOT NULL,
+		long_url TEXT NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		log.Fatal("Error creando la tabla:", err)
+		log.Fatal("Error creating table:", err)
 	}
 }
 
@@ -72,18 +96,18 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 		body.URL = "https://" + body.URL
 	}
 
-	// Generar código único
+	// Generar código único (slug)
 	var code string
 	for {
-		code = randomCode()
+		code = randomSlug()
 		var existing string
-		err := db.QueryRow("SELECT code FROM urls WHERE code = ?", code).Scan(&existing)
+		err := db.QueryRow("SELECT code FROM urls WHERE code = $1", code).Scan(&existing)
 		if err == sql.ErrNoRows {
 			break
 		}
 	}
 
-	_, err := db.Exec("INSERT INTO urls (code, long_url) VALUES (?, ?)", code, body.URL)
+	_, err := db.Exec("INSERT INTO urls (code, long_url) VALUES ($1, $2)", code, body.URL)
 	if err != nil {
 		http.Error(w, "Error guardando la URL", http.StatusInternalServerError)
 		return
@@ -117,7 +141,7 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var longURL string
-	err := db.QueryRow("SELECT long_url FROM urls WHERE code = ?", code).Scan(&longURL)
+	err := db.QueryRow("SELECT long_url FROM urls WHERE code = $1", code).Scan(&longURL)
 	if err == sql.ErrNoRows {
 		http.Error(w, "URL no encontrada", http.StatusNotFound)
 		return
@@ -130,6 +154,9 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
 	initDB()
 	defer db.Close()
 
