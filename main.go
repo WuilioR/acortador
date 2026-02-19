@@ -1,7 +1,7 @@
 package main
 
 import (
-	"database/sql"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,14 +11,18 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 )
 
-var db *sql.DB
+// Estructura para la tabla de Supabase
+type URLMapping struct {
+	Code    string `json:"code"`
+	LongURL string `json:"long_url"`
+}
 
-const (
-// No necesitamos charset ni codeLen ahora
+var (
+	supabaseURL string
+	supabaseKey string
 )
 
 var adjectives = []string{
@@ -47,36 +51,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func initDB() {
-	var err error
-	connStr := getEnv("DATABASE_URL", "")
-	if connStr == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
-	}
-
-	db, err = sql.Open("pgx", connStr)
-	if err != nil {
-		log.Fatal("Error opening database connection:", err)
-	}
-
-	// Verify connection
-	if err = db.Ping(); err != nil {
-		log.Fatal("Error connecting to the database:", err)
-	}
-
-	// Create table if not exists (PostgreSQL syntax)
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS urls (
-		id SERIAL PRIMARY KEY,
-		code TEXT UNIQUE NOT NULL,
-		long_url TEXT NOT NULL,
-		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-	)`)
-	if err != nil {
-		log.Fatal("Error creating table:", err)
-	}
-}
-
-// POST /shorten  body: {"url": "https://..."}
+// POST /shorten
 func shortenHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
@@ -91,38 +66,58 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Agregar esquema si falta
 	if !strings.HasPrefix(body.URL, "http://") && !strings.HasPrefix(body.URL, "https://") {
 		body.URL = "https://" + body.URL
 	}
 
-	// Generar código único (slug)
+	// Generar código único verificando en Supabase
 	var code string
 	for {
 		code = randomSlug()
-		var existing string
-		err := db.QueryRow("SELECT code FROM urls WHERE code = $1", code).Scan(&existing)
-		if err == sql.ErrNoRows {
+		// Verificar si existe usando REST (SELECT)
+		req, _ := http.NewRequest("GET", fmt.Sprintf("%s/rest/v1/urls?code=eq.%s&select=code", supabaseURL, code), nil)
+		req.Header.Set("apikey", supabaseKey)
+		req.Header.Set("Authorization", "Bearer "+supabaseKey)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("Error verificando código: %v", err)
+			continue
+		}
+
+		var results []map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&results)
+		resp.Body.Close()
+
+		if len(results) == 0 {
 			break
 		}
 	}
 
-	_, err := db.Exec("INSERT INTO urls (code, long_url) VALUES ($1, $2)", code, body.URL)
-	if err != nil {
-		http.Error(w, "Error guardando la URL", http.StatusInternalServerError)
+	// Insertar en Supabase via REST
+	mapping := URLMapping{Code: code, LongURL: body.URL}
+	jsonData, _ := json.Marshal(mapping)
+
+	req, _ := http.NewRequest("POST", supabaseURL+"/rest/v1/urls", bytes.NewBuffer(jsonData))
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=minimal")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
+		http.Error(w, "Error guardando en Supabase", http.StatusInternalServerError)
 		return
 	}
+	resp.Body.Close()
 
 	var shortURL string
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL != "" {
-		// Asegurarse de que no termine con slash
 		baseURL = strings.TrimSuffix(baseURL, "/")
 		shortURL = baseURL + "/" + code
 	} else {
-		// Fallback dinámico
 		scheme := "http"
-		// Detectar HTTPS (incluyendo detrás de proxies como Render/Cloudflare)
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			scheme = "https"
 		}
@@ -141,25 +136,38 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var longURL string
-	err := db.QueryRow("SELECT long_url FROM urls WHERE code = $1", code).Scan(&longURL)
-	if err == sql.ErrNoRows {
-		http.Error(w, "URL no encontrada", http.StatusNotFound)
+	// Buscar en Supabase via REST (SELECT)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/rest/v1/urls?code=eq.%s&select=long_url", supabaseURL, code), nil)
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "Error de conexión con Supabase", http.StatusInternalServerError)
 		return
-	} else if err != nil {
-		http.Error(w, "Error interno", http.StatusInternalServerError)
+	}
+	defer resp.Body.Close()
+
+	var results []URLMapping
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil || len(results) == 0 {
+		http.Error(w, "URL no encontrada", http.StatusNotFound)
 		return
 	}
 
-	http.Redirect(w, r, longURL, http.StatusFound)
+	http.Redirect(w, r, results[0].LongURL, http.StatusFound)
 }
 
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
-	initDB()
-	defer db.Close()
+
+	supabaseURL = os.Getenv("SUPABASE_URL")
+	supabaseKey = os.Getenv("SUPABASE_KEY")
+
+	if supabaseURL == "" || supabaseKey == "" {
+		log.Fatal("SUPABASE_URL and SUPABASE_KEY are required")
+	}
 
 	port := getEnv("PORT", "8080")
 
@@ -168,6 +176,6 @@ func main() {
 	http.HandleFunc("/shorten", shortenHandler)
 	http.HandleFunc("/", redirectHandler)
 
-	log.Printf("Servidor corriendo en el puerto %s", port)
+	log.Printf("Servidor REST corriendo en el puerto %s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
