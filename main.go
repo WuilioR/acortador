@@ -25,23 +25,16 @@ var (
 	supabaseKey string
 )
 
-var adjectives = []string{
-	"feliz", "rapido", "brillante", "genial", "valiente", "sabio", "fuerte", "amable", "calmado", "fresco",
-	"rojo", "azul", "verde", "dorado", "plateado", "lindo", "epico", "super", "mega", "ultra",
-}
-
-var nouns = []string{
-	"panda", "tigre", "leon", "aguila", "delfin", "perro", "gato", "lobo", "oso", "halcon",
-	"sol", "luna", "estrella", "rio", "monte", "cielo", "mar", "bosque", "fuego", "rayo",
-	"code", "byte", "pixel", "data", "bot", "red", "link", "web", "app", "sitio",
-}
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const codeLen = 6
 
 func randomSlug() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	adj := adjectives[r.Intn(len(adjectives))]
-	noun := nouns[r.Intn(len(nouns))]
-	num := r.Intn(1000) // 0-999
-	return fmt.Sprintf("%s-%s-%d", adj, noun, num)
+	b := make([]byte, codeLen)
+	for i := range b {
+		b[i] = charset[r.Intn(len(charset))]
+	}
+	return string(b)
 }
 
 func getEnv(key, fallback string) string {
