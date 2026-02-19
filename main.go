@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -47,12 +49,53 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// forceIPv4 resolves the hostname to an IPv4 address to avoid "network unreachable"
+// errors on environments that try IPv6 (AAAA) but don't support it (e.g. Render/Docker).
+func forceIPv4(connStr string) string {
+	u, err := url.Parse(connStr)
+	if err != nil {
+		return connStr // Si falla el parseo, devolvemos el original
+	}
+
+	host := u.Hostname()
+	port := u.Port()
+
+	// Obtener IPs del host
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return connStr
+	}
+
+	// Buscar la primera IPv4
+	var ipv4Str string
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			ipv4Str = ip.String()
+			break
+		}
+	}
+
+	// Si encontramos IPv4, reemplazamos el host en la URL
+	if ipv4Str != "" {
+		if port != "" {
+			u.Host = ipv4Str + ":" + port
+		} else {
+			u.Host = ipv4Str
+		}
+	}
+
+	return u.String()
+}
+
 func initDB() {
 	var err error
 	connStr := getEnv("DATABASE_URL", "")
 	if connStr == "" {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
+
+	// Force IPv4 resolution to avoid Render/Docker IPv6 issues
+	connStr = forceIPv4(connStr)
 
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
