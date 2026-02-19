@@ -2,14 +2,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -29,10 +30,15 @@ const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 const codeLen = 6
 
 func randomSlug() string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	b := make([]byte, codeLen)
 	for i := range b {
-		b[i] = charset[r.Intn(len(charset))]
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			// Fallback extremadamente improbable, pero por seguridad idiomática
+			b[i] = charset[0]
+			continue
+		}
+		b[i] = charset[num.Int64()]
 	}
 	return string(b)
 }
@@ -61,6 +67,18 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 
 	if !strings.HasPrefix(body.URL, "http://") && !strings.HasPrefix(body.URL, "https://") {
 		body.URL = "https://" + body.URL
+	}
+
+	// Validación estricta de URL
+	u, err := url.ParseRequestURI(body.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		http.Error(w, "URL con formato o protocolo no permitido", http.StatusBadRequest)
+		return
+	}
+
+	if u.Host == "" || !strings.Contains(u.Host, ".") {
+		http.Error(w, "Host de URL inválido", http.StatusBadRequest)
+		return
 	}
 
 	// Generar código único verificando en Supabase
@@ -158,6 +176,17 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, results[0].LongURL, http.StatusFound)
 }
 
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://djhxciacebtabtlwlgwx.supabase.co")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
@@ -172,11 +201,15 @@ func main() {
 
 	port := getEnv("PORT", "8080")
 
+	mux := http.NewServeMux()
 	fs := http.FileServer(http.Dir("./static"))
-	http.Handle("/static/", http.StripPrefix("/static/", fs))
-	http.HandleFunc("/shorten", shortenHandler)
-	http.HandleFunc("/", redirectHandler)
+	mux.Handle("/static/", http.StripPrefix("/static/", fs))
+	mux.HandleFunc("/shorten", shortenHandler)
+	mux.HandleFunc("/", redirectHandler)
+
+	// Aplicar middleware de cabeceras de seguridad
+	handler := securityHeaders(mux)
 
 	log.Printf("Servidor REST corriendo en el puerto %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
