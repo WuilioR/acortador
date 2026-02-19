@@ -108,7 +108,7 @@
 
         const data = await res.json();
         shortLink.href = data.short_url;
-        shortLink.textContent = data.short_url;
+        shortLink.textContent = data.display_url || data.short_url;
         result.hidden = false;
         result.classList.add('show');
       } catch (err) {

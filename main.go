@@ -123,7 +123,10 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 	displayURL = strings.TrimPrefix(displayURL, "https://")
 	displayURL = strings.TrimPrefix(displayURL, "http://")
 
-	json.NewEncoder(w).Encode(map[string]string{"short_url": displayURL})
+	json.NewEncoder(w).Encode(map[string]string{
+		"short_url":   shortURL,
+		"display_url": displayURL,
+	})
 }
 
 // GET /{code}
