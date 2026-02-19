@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
 )
 
 var db *sql.DB
@@ -54,7 +54,7 @@ func initDB() {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	db, err = sql.Open("postgres", connStr)
+	db, err = sql.Open("pgx", connStr)
 	if err != nil {
 		log.Fatal("Error opening database connection:", err)
 	}
