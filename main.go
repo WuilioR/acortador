@@ -122,7 +122,8 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Fallback dinámico
 		scheme := "http"
-		if r.TLS != nil {
+		// Detectar HTTPS (incluyendo detrás de proxies como Render/Cloudflare)
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			scheme = "https"
 		}
 		shortURL = scheme + "://" + r.Host + "/" + code
