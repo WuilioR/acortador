@@ -118,7 +118,12 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"short_url": shortURL})
+	// Quitar el protocolo para fines estéticos si el usuario lo prefiere
+	displayURL := shortURL
+	displayURL = strings.TrimPrefix(displayURL, "https://")
+	displayURL = strings.TrimPrefix(displayURL, "http://")
+
+	json.NewEncoder(w).Encode(map[string]string{"short_url": displayURL})
 }
 
 // GET /{code}
